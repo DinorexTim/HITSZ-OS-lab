@@ -42,6 +42,214 @@ index b971308..f40ac6f 100644
  
  ##
  ##  FOR testing lab grading script
+diff --git a/commands.gdb b/commands.gdb
+new file mode 100644
+index 0000000..64ea4a1
+--- /dev/null
++++ b/commands.gdb
+@@ -0,0 +1,12 @@
++b main.c:29
++c
++s
++u 200
++n
++p p->name
++b trap.c:55
++c
++n
++p p->name
++da
++q
+diff --git a/commit.patch b/commit.patch
+new file mode 100644
+index 0000000..07030d3
+--- /dev/null
++++ b/commit.patch
+@@ -0,0 +1,184 @@
++diff --git a/.vscode/settings.json b/.vscode/settings.json
++new file mode 100644
++index 0000000..81ab260
++--- /dev/null
+++++ b/.vscode/settings.json
++@@ -0,0 +1,5 @@
+++{
+++    "files.associations": {
+++        "user.h": "c"
+++    }
+++}
++\ No newline at end of file
++diff --git a/Makefile b/Makefile
++index b971308..f40ac6f 100644
++--- a/Makefile
+++++ b/Makefile
++@@ -157,7 +157,9 @@ UPROGS=\
++ 	$U/_grind\
++ 	$U/_wc\
++ 	$U/_zombie\
++-
+++	$U/_sleep\
+++	$U/_pingpong\
+++	$U/_find\
++ 
++ ifeq ($(LAB),syscall)
++ UPROGS += \
++@@ -242,15 +244,8 @@ qemu-gdb: $K/kernel .gdbinit fs.img
++ 	@echo "*** Now run 'gdb' in another window." 1>&2
++ 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
++ 
++-GDBARGS = 
++-GDBARGS += -ex 'set architecture riscv:rv64'
++-GDBARGS += -ex 'target remote 127.0.0.1:$(GDBPORT)'
++-GDBARGS += -ex 'symbol-file kernel/kernel'
++-GDBARGS += -ex 'set riscv use-compressed-breakpoints yes'
++-
++-
++ gdb: 
++-	$(GDB) $(GDBARGS)
+++	$(GDB)
++ 
++ ##
++ ##  FOR testing lab grading script
++diff --git a/user/find.c b/user/find.c
++new file mode 100644
++index 0000000..4e0c397
++--- /dev/null
+++++ b/user/find.c
++@@ -0,0 +1,66 @@
+++#include "kernel/types.h"
+++#include "kernel/stat.h"
+++#include "user/user.h"
+++#include "kernel/fs.h"
+++
+++void find(char* path, char* target_filename) {
+++    char buf[256],*p;
+++    int fd;
+++    struct dirent de;
+++    struct stat st;
+++
+++    if ((fd = open(path, 0)) < 0) {
+++        fprintf(2, "find: cannot open %s\n", path);
+++        return;
+++    }
+++
+++    if (fstat(fd, &st) < 0) {
+++        fprintf(2, "find: cannot stat %s\n", path);
+++        close(fd);
+++        return;
+++    }
+++    strcpy(buf, path);
+++    p = buf + strlen(buf)-1;
+++    if (*p != '/'){
+++        p++;
+++        *p++ = '/'; // 加斜杠
+++    }
+++    // 通过 read 函数从文件描述符 fd 中读取目录项
+++    while (read(fd, &de, sizeof(de)) == sizeof(de)) {
+++        if (de.inum == 0 || strcmp(de.name,".") == 0 || strcmp(de.name,"..") == 0){
+++            continue;
+++        } 
+++        memmove(p, de.name,sizeof(de.name));     
+++        if (stat(buf, &st) < 0) {
+++            fprintf(2, "find: cannot stat %s\n", buf);
+++            close(fd);
+++            continue;
+++        }
+++        // printf("buf is %s,type is %d\n",buf,st.type);
+++        switch (st.type){
+++            case T_DIR:{
+++                if(strcmp(target_filename, de.name) == 0){
+++                    printf("%s\n",buf);
+++                }
+++                find(buf, target_filename);
+++                break;
+++            }
+++            case T_FILE:{
+++                if(strcmp(target_filename, de.name) == 0){
+++                    printf("%s\n",buf);
+++                }
+++                break;
+++            }
+++        }
+++    }
+++    close(fd);
+++}
+++
+++int main(int argc, char *argv[]) {
+++    if (argc == 3) {
+++        find(argv[1], argv[2]);
+++    }else{
+++        printf("find: find needs path and filename!\n");
+++    }
+++    exit(0);
+++}
++diff --git a/user/pingpong.c b/user/pingpong.c
++new file mode 100644
++index 0000000..5c4a9a5
++--- /dev/null
+++++ b/user/pingpong.c
++@@ -0,0 +1,41 @@
+++#include "kernel/types.h"
+++#include "user/user.h"
+++
+++int main(int argc, char *argv[]){
+++    int c2f[2];   // 子进程to父进程管道
+++    int f2c[2];   // 子进程to父进程管道
+++
+++    
+++    pipe(c2f);
+++    pipe(f2c);
+++    
+++    int pid = fork();
+++
+++    if (pid == 0){
+++        int pid_p;
+++        /* 子进程读取父进程pid */
+++        close(f2c[1]);
+++        /* 子进程传递pid */
+++        close(c2f[0]);
+++        read(f2c[0], &pid_p, sizeof(pid_p));
+++        printf("%d: received ping from pid %d\n",getpid(),pid_p);
+++        int pid_parse = getpid();
+++        write(c2f[1],&pid_parse,sizeof(pid_parse));  
+++        close(f2c[0]);   
+++        close(c2f[1]);
+++
+++    }else{
+++        int pid_c;
+++        /* 父进程传递pid */
+++        close(f2c[0]);   
+++        /* 父进程读取子进程pid */
+++        close(c2f[1]);
+++        int pid_parse = getpid();
+++        write(f2c[1],&pid_parse,sizeof(pid_parse));   
+++        read(c2f[0], &pid_c, sizeof(pid_c));
+++        printf("%d: received pong from pid %d\n",getpid(),pid_c);
+++        close(f2c[1]); 
+++        close(c2f[0]); 
+++    }
+++    exit(0);
+++}
++\ No newline at end of file
++diff --git a/user/sleep.c b/user/sleep.c
++new file mode 100644
++index 0000000..f79541b
++--- /dev/null
+++++ b/user/sleep.c
++@@ -0,0 +1,13 @@
+++#include "kernel/types.h"
+++#include "user.h"
+++
+++int main(int argc,char* argv[]){
+++    if(argc != 2){
+++        printf("Sleep needs one argument!\n");
+++        exit(-1);
+++    }
+++    int ticks = atoi(argv[1]);
+++    sleep(ticks);
+++    printf("(nothing happens for a little while)\n");
+++    exit(0);
+++}
++\ No newline at end of file
 diff --git a/user/find.c b/user/find.c
 new file mode 100644
 index 0000000..4e0c397
@@ -116,10 +324,10 @@ index 0000000..4e0c397
 +}
 diff --git a/user/pingpong.c b/user/pingpong.c
 new file mode 100644
-index 0000000..5c4a9a5
+index 0000000..c0453d0
 --- /dev/null
 +++ b/user/pingpong.c
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,43 @@
 +#include "kernel/types.h"
 +#include "user/user.h"
 +
@@ -137,27 +345,29 @@ index 0000000..5c4a9a5
 +        int pid_p;
 +        /* 子进程读取父进程pid */
 +        close(f2c[1]);
++        read(f2c[0], &pid_p, sizeof(pid_p));
++        close(f2c[0]); 
++        printf("%d: received ping from pid %d\n",getpid(),pid_p);
++    
 +        /* 子进程传递pid */
 +        close(c2f[0]);
-+        read(f2c[0], &pid_p, sizeof(pid_p));
-+        printf("%d: received ping from pid %d\n",getpid(),pid_p);
 +        int pid_parse = getpid();
 +        write(c2f[1],&pid_parse,sizeof(pid_parse));  
-+        close(f2c[0]);   
 +        close(c2f[1]);
 +
 +    }else{
 +        int pid_c;
 +        /* 父进程传递pid */
 +        close(f2c[0]);   
-+        /* 父进程读取子进程pid */
-+        close(c2f[1]);
 +        int pid_parse = getpid();
 +        write(f2c[1],&pid_parse,sizeof(pid_parse));   
-+        read(c2f[0], &pid_c, sizeof(pid_c));
-+        printf("%d: received pong from pid %d\n",getpid(),pid_c);
 +        close(f2c[1]); 
-+        close(c2f[0]); 
++        
++        /* 父进程读取子进程pid */
++        close(c2f[1]);
++        read(c2f[0], &pid_c, sizeof(pid_c));
++        close(c2f[0]);
++        printf("%d: received pong from pid %d\n",getpid(),pid_c);    
 +    }
 +    exit(0);
 +}
