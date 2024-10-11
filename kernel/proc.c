@@ -291,6 +291,28 @@ void reparent(struct proc *p) {
   }
 }
 
+char* convertState(int state){
+  switch (state){
+  case UNUSED:{
+    return "unused";
+  }
+  case SLEEPING:{
+    return "sleep";
+  }
+  case RUNNABLE:{
+    return "runble";
+  }
+  case RUNNING:{
+    return "run";
+  }
+  case ZOMBIE:{
+    return "zombie";
+  }
+  default:
+    return "zombie";
+  }
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
@@ -338,6 +360,18 @@ void exit(int status) {
 
   acquire(&p->lock);
 
+  exit_info("proc %d exit, parent pid %d, name %s, state %s\n", p->pid, p->parent->pid, p->parent->name, convertState(p->parent->state));
+
+  int child_num = 0;
+  for (struct proc* pp = proc; pp < &proc[NPROC]; pp++) {
+    if (pp->parent == p) {
+      acquire(&pp->lock);
+      exit_info("proc %d exit, child %d, pid %d, name %s, state %s\n",p->pid, child_num, pp->pid, pp->name, convertState(pp->state));
+      child_num++;
+      release(&pp->lock);
+    }
+  }
+
   // Give any children to init.
   reparent(p);
 
@@ -356,7 +390,7 @@ void exit(int status) {
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
-int wait(uint64 addr) {
+int wait(uint64 addr, int flags) {
   struct proc *np;
   int havekids, pid;
   struct proc *p = myproc();
@@ -364,7 +398,11 @@ int wait(uint64 addr) {
   // hold p->lock for the whole time to avoid lost
   // wakeups from a child's exit().
   acquire(&p->lock);
-
+  argint(1,&flags);
+  if (flags == 1){
+    release(&p->lock);
+    return -1;
+  }
   for (;;) {
     // Scan through table looking for exited children.
     havekids = 0;
