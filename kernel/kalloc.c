@@ -14,35 +14,29 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+char lock_n[NCPU][24];
+
 struct run {
   struct run *next;
 };
 
-struct {
+struct kmem{
   struct spinlock lock;
   struct run *freelist;
-} kmem[NCPU];
+};
+
+struct kmem kmems[NCPU];
 
 void
 kinit()
 {
   //循环生成，为每个CPU分配一个内存锁
-  // uint64 block_size = ((uint64)PHYSTOP - (uint64)end)/NCPU;
-  // char *start = (char*)end;
   for (int i = 0; i < NCPU; i++){
-    initlock(&(kmem[i].lock), "kmem");
-    
-    printf("succes: %d\n",i+1);
-    // freerange(start, start + block_size);
-    // start += block_size;
+    snprintf(lock_n[i], sizeof(lock_n[i]), "kmem%d", i);
+    initlock(&(kmems[i].lock), lock_n[i]);
+    printf("success: %d\n",i+1);
   }
   freerange(end, (void*)PHYSTOP);
-  // char *start = (char*)end;
-  // char *stop = (char*)PHYSTOP;
-  // while (start < stop) {
-  //   freerange(start, start + block_size);
-  //   start += block_size;
-  // }
 }
 
 void
@@ -50,8 +44,9 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -71,10 +66,14 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem[cpuid()].lock);
-  r->next = kmem[cpuid()].freelist;
-  kmem[cpuid()].freelist = r;
-  release(&kmem[cpuid()].lock);
+  push_off();
+  int cpu_id = cpuid();
+  pop_off();
+
+  acquire(&kmems[cpu_id].lock);
+  r->next = kmems[cpu_id].freelist;
+  kmems[cpu_id].freelist = r;
+  release(&kmems[cpu_id].lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -85,11 +84,39 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem[cpuid()].lock);
-  r = kmem[cpuid()].freelist;
-  if(r)
-    kmem[cpuid()].freelist = r->next;
-  release(&kmem[cpuid()].lock);
+  push_off();
+  int cpu_id = cpuid();
+  pop_off();
+
+  acquire(&kmems[cpu_id].lock);
+  r = kmems[cpu_id].freelist;
+
+  if(r){
+    kmems[cpu_id].freelist = r->next;
+    release(&kmems[cpu_id].lock);
+  }
+  
+  else{
+    release(&kmems[cpu_id].lock);
+    for (int i = 0; i < NCPU; i++){
+      //跳过申请分配的CPU
+      if (i != cpu_id){
+        acquire(&kmems[i].lock);
+        r = kmems[i].freelist;
+        if (r){
+          kmems[i].freelist = r->next;
+          release(&kmems[i].lock);
+          break;
+        }else{
+          release(&kmems[i].lock);
+        }
+        if (i == NCPU-1){
+          //没有可以分配的内存，返回0
+          return 0;
+        }
+      }
+    }
+  }
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
