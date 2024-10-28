@@ -33,10 +33,6 @@ struct {
   struct spinlock global_lock;
   struct spinlock lock[NBUCKET];
   struct buf buf[NBUF];
-
-  // Linked list of all buffers, through prev/next.
-  // Sorted by how recently the buffer was used.
-  // head.next is most recent, head.prev is least.
   struct buf bucket[NBUCKET];
 } bcache;
 
@@ -69,9 +65,6 @@ binit(void)
   }
 }
 
-// Look through buffer cache for block on device dev.
-// If not found, allocate a buffer.
-// In either case, return locked buffer.
 static struct buf*
 bget(uint dev, uint blockno)
 {
