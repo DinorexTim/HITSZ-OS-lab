@@ -39,6 +39,7 @@ findslot(struct spinlock *lk) {
       return;
     }
   }
+  printf("wrong lock is %s\n",lk->name);
   panic("findslot");
 }
 #endif
