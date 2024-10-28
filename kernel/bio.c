@@ -90,7 +90,8 @@ bget(uint dev, uint blockno)
     }
   }
 
-  // 在当前桶查找
+  // Not cached.
+  // Recycle the least recently used (LRU) unused buffer.
   for(b = bcache.bucket[bucket_key].prev; b != &bcache.bucket[bucket_key]; b = b->prev){
     if(b->refcnt == 0) {
       b->dev = dev;
@@ -103,8 +104,6 @@ bget(uint dev, uint blockno)
     }
   }
 
-  // Not cached.
-  // Recycle the least recently used (LRU) unused buffer.
   release(&bcache.lock[bucket_key]);
   acquire(&bcache.global_lock);
   for (int i = 0; i < NBUCKET; i++){
