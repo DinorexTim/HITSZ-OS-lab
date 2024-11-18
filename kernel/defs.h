@@ -168,7 +168,7 @@ void            uvminit(pagetable_t, uchar *, uint);
 uint64          uvmalloc(pagetable_t, uint64, uint64);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 void            vmprint(pagetable_t);
-void            vmprint_recursive(pagetable_t, int);
+void            vmprint_recursive(pagetable_t, int, uint64);
 #ifdef SOL_COW
 #else
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
