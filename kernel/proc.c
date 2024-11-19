@@ -157,7 +157,7 @@ static void freeproc(struct proc *p) {
   }
   // 释放独立内核页表
   if (p->k_pagetable){
-    
+    kpagetable_free(p->k_pagetable);
   }
   p->k_pagetable = 0;
 }
@@ -241,6 +241,9 @@ void userinit(void) {
 
   p->state = RUNNABLE;
 
+  // 同步进程页表
+  sync_pagetable(p->pagetable, p->k_pagetable);
+
   release(&p->lock);
 }
 
@@ -259,6 +262,9 @@ int growproc(int n) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = sz;
+
+  //同步进程页表
+  sync_pagetable(p->pagetable, p->k_pagetable);
   return 0;
 }
 
@@ -300,7 +306,10 @@ int fork(void) {
   pid = np->pid;
 
   np->state = RUNNABLE;
-
+  
+  //同步进程页表
+  sync_pagetable(np->pagetable, np->k_pagetable);
+  
   release(&np->lock);
 
   return pid;
