@@ -21,6 +21,8 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[];  // trampoline.S
 
+extern pagetable_t kernel_pagetable;
+
 // initialize the proc table at boot time.
 void procinit(void) {
   struct proc *p;
@@ -37,6 +39,7 @@ void procinit(void) {
     uint64 va = KSTACK((int)(p - proc));
     kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
     p->kstack = va;
+    p->kstack_pa = (uint64)pa;
   }
   kvminithart();
 }
@@ -111,6 +114,16 @@ found:
     return 0;
   }
 
+
+  // 创建独立内核页表
+  p->k_pagetable = kvminit_ver2();
+  if (p->k_pagetable == 0) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  kvmmap_ver2(p->k_pagetable, p->kstack, p->kstack_pa, PGSIZE, PTE_R | PTE_W);
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -136,6 +149,32 @@ static void freeproc(struct proc *p) {
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  pagetable_t pa = (pagetable_t)PTE2PA(p->k_pagetable[0]);
+  // 将内核页表次级页表0-95置零
+  for (int i = 0; i < 96; i++){
+    pa[i] = 0;
+  }
+  // 释放独立内核页表
+  if (p->k_pagetable){
+    
+  }
+  p->k_pagetable = 0;
+}
+
+void kpagetable_free(pagetable_t pagetable) {
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i]; //获取第i条PTE
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){ 
+      uint64 child = PTE2PA(pte); // 将PTE转为为物理地址
+      kpagetable_free((pagetable_t)child); // 递归调用
+      pagetable[i] = 0;
+    } else if(pte & PTE_V){ 
+      // leaf PTE.
+      pagetable[i] = 0; // 释放叶节点
+    }
+  }
+  kfree((void*)pagetable);
 }
 
 // Create a user page table for a given process,
@@ -430,8 +469,13 @@ void scheduler(void) {
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        
+        w_satp(MAKE_SATP(p->k_pagetable));
+        sfence_vma();
         swtch(&c->context, &p->context);
 
+        // 恢复至全局内核页表
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -442,6 +486,8 @@ void scheduler(void) {
     }
 #if !defined(LAB_FS)
     if (found == 0) {
+      // 恢复至全局内核页表
+      kvminithart();
       intr_on();
       asm volatile("wfi");
     }

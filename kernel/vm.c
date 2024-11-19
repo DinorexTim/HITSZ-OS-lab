@@ -400,7 +400,7 @@ void vmprint_recursive(pagetable_t pgtbl, int level, uint64 va) {
         printf("\t||");
       }
       printf("idx: %d: pa: %p, flags: ----\n",i, child);
-      int offset = i*PGSIZE;
+      uint64 offset = i*PGSIZE;
       for (int k = level; k < 2; k++){
         offset *= 512;
       }
@@ -416,5 +416,43 @@ void vmprint_recursive(pagetable_t pgtbl, int level, uint64 va) {
       uint64 child = PTE2PA(pte); // 将PTE转为为物理地址
       printf("idx: %d: va: %p -> pa: %p, flags: %s%s%s%s\n", i, va + i*PGSIZE, child, PTE_R&pte?"r":"-", PTE_W&pte?"w":"-", PTE_X&pte?"x":"-", PTE_U&pte?"u":"-");
     }
+  }
+}
+
+/**
+ *  任务2
+ */
+
+pagetable_t kvminit_ver2(){
+  pagetable_t k_pagetable = (pagetable_t)kalloc();
+  memset(k_pagetable, 0, PGSIZE);
+
+  // uart registers
+  kvmmap_ver2(k_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  kvmmap_ver2(k_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  // kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  kvmmap_ver2(k_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  kvmmap_ver2(k_pagetable, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  kvmmap_ver2(k_pagetable, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  kvmmap_ver2(k_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  return k_pagetable;
+}
+
+void kvmmap_ver2(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm) {
+  if (mappages(pagetable, va, sz, pa, perm) != 0) {
+    panic("kvmmap_ver2");
   }
 }
